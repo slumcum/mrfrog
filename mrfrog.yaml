@@ -1,0 +1,270 @@
+esphome:
+  name: mrfrog
+  friendly_name: MrFrog
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "yourapikey"
+
+ota:
+  - platform: esphome
+    password: "yourpassword"
+
+wifi:
+  ssid: yourwifi
+  password: yourwifipassword
+  fast_connect: True
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "MrFrog Fallback Hotspot"
+    password: "mrfrogfrogmister"
+
+captive_portal:
+
+globals:
+  - id: global_misting_duration
+    type: int
+    restore_value: yes
+    initial_value: "10"
+    
+  - id: global_auto_misting_enabled
+    type: bool
+    restore_value: yes
+    initial_value: 'true'
+
+  - id: global_is_misting
+    type: bool
+    restore_value: False
+    initial_value: "false"
+
+  - id: global_screen_enabled
+    type: bool
+    restore_value: "true"
+    initial_value: "true"
+
+# Temperature/Humidity Sensors
+sensor:
+  - platform: dht
+    pin: GPIO19
+    temperature:
+      id: temp_left
+      name: "Temperature Left"
+      filters:
+        - lambda: |-
+            return x * (9.0/5.0) + 32.0;
+      unit_of_measurement: "°F"
+
+    humidity:
+      id: humid_left
+      accuracy_decimals: 1
+      name: "Humidity Left"
+    update_interval: 5s
+
+  - platform: dht
+    pin: GPIO18
+    temperature: 
+      id: temp_right
+      name: "Temperature Right"
+      filters:
+        - lambda: |-
+            return x * (9.0/5.0) + 32.0;
+      unit_of_measurement: "°F"
+
+    humidity: 
+      id: humid_right
+      accuracy_decimals: 1
+      name: "Humidtity Right" 
+
+# Uptime sensor.
+  - platform: uptime
+    name: MrFrog Uptime
+    id: uptime_sensor
+    update_interval: 90s
+
+# WiFi Signal sensor.
+  - platform: wifi_signal
+    name: MrFrog WiFi Signal
+    update_interval: 90s
+    id: wifi_strength_sensor
+#    filters:
+ #     lambda: |- # Turn dBm to percentage
+ #       return 2 * (x + 100);
+  
+
+# GPIO Pin Configuration
+switch:
+  - platform: template
+    id: ha_auto_misting_enabled
+    name: "MrFrog Auto Misting Enabled"
+    lambda: |-
+      return id(global_auto_misting_enabled);
+    turn_on_action:
+      - lambda: |-
+          id(global_auto_misting_enabled) = true;
+    turn_off_action:
+      - lambda: |-
+          id(global_auto_misting_enabled) = false;
+
+  - platform: gpio
+    name: "Mister On"
+    id: mister_pump
+    pin: GPIO23
+    on_turn_on: 
+      then:
+        - lambda: |-
+            id(global_is_misting) = true;
+    on_turn_off: 
+      then:
+        - lambda: |-
+            id(global_is_misting) = false;
+
+# Button used in Home Assistant to mimic physical button press
+button:
+  - platform: template
+    id: ha_manual_mist
+    name: "Manual Mist"
+    icon: mdi:spray-bottle
+    on_press:
+      - script.execute: run_auto_mist
+
+# Physical Button
+binary_sensor:
+  - platform: gpio
+    id: misting_button
+    pin:
+      number: GPIO13
+      mode:
+        input: true
+        pulldown: true
+    name: "Misting"
+    filters:
+      - delayed_on_off: 10ms
+    on_press:
+      then:
+        - logger.log: "button pressing mist start"
+        - script.execute: run_auto_mist
+
+# Variable to set how long to mist for in Home Assistant
+number:
+  - platform: template
+    name: "Misting Duration"
+    id: mister_configure_duration
+    min_value: 1
+    max_value: 60
+    step: 1
+    on_value: 
+      then:
+        - lambda: |-
+            id(global_misting_duration) = id(mister_configure_duration).state;
+    set_action: 
+      then:
+        - lambda: |-
+            id(global_misting_duration) = x;
+
+# Cron-like Scheduler
+# Outside of Home Assistant, firmware level misting every x interval
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: /4  # Mist every 4 hours
+        then:
+          - script.execute: run_auto_mist
+
+script:
+  - id: run_auto_mist
+    mode: single
+    then:
+      - switch.turn_on: mister_pump
+      - logger.log: "Misting Start"
+      - delay: !lambda 'return 1000 * id(global_misting_duration);'
+      - logger.log: "Misting Stop"
+      - switch.turn_off: mister_pump
+
+# Screen code
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  frequency: 400kHz
+
+font:
+  - file: 
+      type: gfonts
+      family: Roboto
+      weight: 100
+    id: roboto    
+    size: 16
+
+  - file: 'fonts/materialdesignicons-webfont.ttf'
+    id: icons_16
+    size: 16
+    glyphs: [
+      '󰤫', #WiFi Disconnected
+      '󰤟', #WiFi Weak
+      '󰤢', #WiFi Fair
+      '󰤥', #WiFi Good
+      '󰤨', #WiFi Excellet
+      '󰖎', #Water Percent
+      '󰔐', #Thermostat
+      '󰏧', # Pause
+      '󰫠', # Mist
+      ]
+  - file: 'fonts/materialdesignicons-webfont.ttf'
+    id: icons_24
+    size: 24
+    glyphs: [
+      '󰖎', #Water Percent
+      '󰔐', #Thermostat
+      '󰏧', # Pause
+      '󰫠', # Mist
+      ]
+
+
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x64"
+    address: 0x3C
+    lambda: |-
+      if (!id(global_auto_misting_enabled)) {
+      it.printf(0, 0, id(icons_16), "󰏧");
+      }
+      if (id(global_is_misting)) {
+      it.printf(16,0,id(icons_16), "󰫠");
+      }
+      it.printf(108,0,id(roboto), "%i s", id(global_misting_duration));
+      int icon_x = 72;
+      int icon_y = 0;
+      if (id(wifi_strength_sensor).has_state()) {
+        int wifi_strength = id(wifi_strength_sensor).state;
+        if (wifi_strength >= -50) {
+          it.printf(icon_x, icon_y, id(icons_16), TextAlign::TOP_RIGHT, "󰤨"); //# Excelent 
+        } else if (wifi_strength >= -60) {
+          it.printf(icon_x, icon_y, id(icons_16), TextAlign::TOP_RIGHT, "󰤥"); //# Good
+        } else if (wifi_strength >= -70) {
+          it.printf(icon_x, icon_y, id(icons_16), TextAlign::TOP_RIGHT, "󰤢"); //# Fair
+        } else if (wifi_strength >= -80) {
+          it.printf(icon_x, icon_y, id(icons_16), TextAlign::TOP_RIGHT, "󰤟"); //# Weak
+        } else {
+          it.printf(icon_x, icon_y, id(icons_16), TextAlign::TOP_RIGHT, "󰤫"); //# Disconnected
+        }
+      } else {
+        it.printf(icon_x, icon_y, id(icons_16), TextAlign::TOP_RIGHT, "󰤫"); //# Disconnected
+      }
+      it.printf(52, 16, id(icons_24), "%s", "󰖎"); // # Humidity Icon
+      it.printf(52, 40, id(icons_24), "%s", "󰔐"); // # Temperature Icon
+      it.printf(4, 40, id(roboto), "%.1f°", id(temp_left).state); // 
+      it.printf(84, 40, id(roboto), "%.1f°", id(temp_right).state); // 
+      it.printf(4, 16, id(roboto), "%.1f%%", id(humid_left).state); //
+      it.printf(84, 16, id(roboto), "%.1f%%", id(humid_right).state); //
