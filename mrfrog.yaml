@@ -173,15 +173,10 @@ number:
 
 # Cron-like Scheduler
 # Outside of Home Assistant, firmware level misting every x interval
-time:
-  - platform: homeassistant
-    id: homeassistant_time
-    on_time:
-      - seconds: 0
-        minutes: 0
-        hours: /4  # Mist every 4 hours
-        then:
-          - script.execute: run_auto_mist
+interval:
+  - interval: 4h
+    then:
+      - script.execute: run_auto_mist
 
 script:
   - id: run_auto_mist
